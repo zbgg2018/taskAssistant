@@ -213,3 +213,20 @@
     .del-btn span.txt{display:inline}
     .iconbtn{padding:0 10px}
   }
+  /* 页脚：GitHub 源码链接 */
+  .site-footer{
+    display:flex;align-items:center;justify-content:space-between;gap:12px;
+    margin-top:24px;padding:14px 18px;
+    font-size:13px;color:var(--muted);
+    border-top:1px solid var(--border);
+  }
+  .site-footer .copy{white-space:nowrap}
+  .site-footer .gh-link{
+    display:inline-flex;align-items:center;gap:6px;
+    color:var(--primary);text-decoration:none;font-weight:600;
+  }
+  .site-footer .gh-link:hover{text-decoration:underline}
+  .site-footer .gh-link svg{width:16px;height:16px}
+  @media (max-width:600px){
+    .site-footer{margin-top:18px;padding:12px 14px;font-size:12px}
+  }
