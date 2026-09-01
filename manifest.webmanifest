@@ -1,0 +1,19 @@
+{
+  "name": "任务助手 · 在线版",
+  "short_name": "任务助手",
+  "description": "待办、复盘、总结、提醒、随笔一体化任务助手（本地优先 + 云端同步）",
+  "lang": "zh-CN",
+  "start_url": "./index.html",
+  "scope": "./",
+  "display": "standalone",
+  "background_color": "#f4f7fb",
+  "theme_color": "#2563eb",
+  "icons": [
+    {
+      "src": "icon.svg",
+      "sizes": "any",
+      "type": "image/svg+xml",
+      "purpose": "any"
+    }
+  ]
+}

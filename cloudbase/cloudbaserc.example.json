@@ -1,0 +1,36 @@
+{
+  "envId": "YOUR_CLOUDBASE_ENV_ID",
+  "functionRoot": ".",
+  "functions": [
+    {
+      "name": "auth",
+      "handler": "index.main",
+      "runtime": "Nodejs16.13",
+      "memorySize": 256,
+      "timeout": 30,
+      "envVariables": {
+        "AUTH_SECRET": "REPLACE_WITH_YOUR_OWN_AUTH_SECRET"
+      }
+    },
+    {
+      "name": "syncPush",
+      "handler": "index.main",
+      "runtime": "Nodejs16.13",
+      "memorySize": 256,
+      "timeout": 30,
+      "envVariables": {
+        "AUTH_SECRET": "REPLACE_WITH_YOUR_OWN_AUTH_SECRET"
+      }
+    },
+    {
+      "name": "syncPull",
+      "handler": "index.main",
+      "runtime": "Nodejs16.13",
+      "memorySize": 256,
+      "timeout": 30,
+      "envVariables": {
+        "AUTH_SECRET": "REPLACE_WITH_YOUR_OWN_AUTH_SECRET"
+      }
+    }
+  ]
+}

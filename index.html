@@ -1,0 +1,407 @@
+<!--
+  任务助手 · 在线版（online）
+  - 数据与离线版共用同一套模型（todos/reviews/weeklies/reminders/notes）。
+  - 唯一改动接缝在 storage.js：save()/load() 走 StorageAdapter，本地优先 + 云端增量同步（sync.js）。
+  - 业务模块（core.js + modules/*）零改动，仅 save()→StorageAdapter.save()、load()→StorageAdapter.load()。
+  - 离线 PWA 能力保留：manifest.webmanifest + sw.js（App Shell 缓存，可断网打开）。
+  本地预览：在该目录执行  python -m http.server 8000  然后访问 http://localhost:8000/
+-->
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
+<meta name="theme-color" content="#2563eb">
+<link rel="manifest" href="manifest.webmanifest">
+<title>任务助手</title>
+<link rel="stylesheet" href="styles.css">
+</head>
+<body>
+<div class="app">
+  <header class="topbar">
+    <h1>
+      <svg class="logo" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="3" width="7" height="9" rx="1.5"/><rect x="14" y="3" width="7" height="5" rx="1.5"/><rect x="14" y="12" width="7" height="9" rx="1.5"/><rect x="3" y="16" width="7" height="5" rx="1.5"/></svg>
+      任务助手
+    </h1>
+    <span class="badge" id="storeBadge">本地存储</span>
+    <button class="iconbtn" id="acctBtn" title="账号与同步">
+      <svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="8" r="4"/><path d="M4 21a8 8 0 0116 0"/></svg>
+      <span class="txt" id="acctText">未登录</span>
+    </button>
+    <span class="spacer"></span>
+    <button class="iconbtn" id="toolsBtn" title="设置与导入">
+      <svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 15v4a2 2 0 01-2 2H5a2 2 0 01-2-2v-4M7 10l5 5 5-5M12 15V3"/></svg>
+      <span class="txt">设置</span>
+    </button>
+  </header>
+
+  <div class="warn" id="backupWarn" style="display:none">
+    <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 9v4M12 17h.01M10.3 3.9L1.8 18a2 2 0 001.7 3h17a2 2 0 001.7-3L13.7 3.9a2 2 0 00-3.4 0z"/></svg>
+    <span id="backupWarnText">数据已积累 30 条，建议点右上角「设置」导出 JSON 留底。</span>
+  </div>
+
+  <!-- 今天要处理 -->
+  <section class="today">
+    <div class="card">
+      <h2>
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 2v4M12 18v4M4.9 4.9l2.8 2.8M16.3 16.3l2.8 2.8M2 12h4M18 12h4"/><circle cx="12" cy="12" r="3.2"/></svg>
+        今天要处理
+
+        <div class="filters" id="todayPagingToggle" style="margin-left:auto;font-size:13px;gap:4px">
+          <span class="f" data-m="scroll">滚动加载</span><span class="f" data-m="pager">分页</span>
+        </div></h2>
+
+      <div id="todayList"></div>
+    </div>
+  </section>
+
+  <div class="body">
+    <nav class="sidebar" id="nav">
+      <button class="tab active" data-tab="todo">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M9 11l3 3L22 4M21 12v7a2 2 0 01-2 2H5a2 2 0 01-2-2V5a2 2 0 012-2h11"/></svg>
+        待办任务
+      </button>
+      <button class="tab" data-tab="review">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M4 4h16v16H4zM8 9h8M8 13h8M8 17h5"/></svg>
+        复盘
+      </button>
+      <button class="tab" data-tab="weekly">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="4" width="18" height="18" rx="2"/><path d="M16 2v4M8 2v4M3 10h18M8 14h2M8 18h2M14 14h2M14 18h2"/></svg>
+        总结
+      </button>
+      <button class="tab" data-tab="reminder">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M18 8a6 6 0 00-12 0c0 7-3 9-3 9h18s-3-2-3-9M13.73 21a2 2 0 01-3.46 0"/></svg>
+        提醒
+      </button>
+      <button class="tab" data-tab="note">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 20h9M16.5 3.5a2.12 2.12 0 013 3L7 19l-4 1 1-4 12.5-12.5z"/></svg>
+        随笔
+      </button>
+    </nav>
+
+    <main class="main">
+      <!-- 待办 -->
+      <section class="panel active" id="panel-todo">
+        <div class="card">
+          <h3>
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 5v14M5 12h14"/></svg>
+            添加待办任务
+          </h3>
+          <label>任务内容</label>
+          <input type="text" id="todoText" placeholder="要做什么？" maxlength="200">
+          <div class="grid2" id="todoDateRow">
+            <div>
+              <label>开始日期</label>
+              <input type="date" id="todoStart">
+            </div>
+            <div>
+              <label>结束日期</label>
+              <input type="date" id="todoEnd">
+            </div>
+          </div>
+          <div class="disabled-hint" id="todoDateHint" style="display:none">定时任务忽略起止日期；按所选规则自动循环。</div>
+          <div class="grid2">
+            <div>
+              <label>分类</label>
+              <select id="todoCategory"></select>
+            </div>
+            <div>
+              <label>优先级</label>
+              <select id="todoPri">
+            <option value="高">高</option>
+            <option value="中" selected>中</option>
+            <option value="低">低</option>
+              </select>
+            </div>
+          </div>
+          <div class="recur-row">
+            <input type="checkbox" id="todoRecur">
+            <label for="todoRecur">设为定时任务</label>
+          </div>
+          <div id="recurBox" style="display:none;margin-top:4px">
+            <label>重复方式</label>
+            <div class="seg" id="recurFreq">
+              <button type="button" class="seg-btn on" data-freq="weekly">按周</button>
+              <button type="button" class="seg-btn" data-freq="monthly">按月</button>
+            </div>
+            <label id="recurDaysLabel">选择星期几（可多选）</label>
+            <div id="recurDays" class="chip-row"></div>
+            <div class="note">提示：定时任务按所选规则持续出现；勾选后仅当天标记完成，下个周期重新出现。</div>
+          </div>
+          <div class="row-actions">
+            <button class="btn" id="addTodo">
+              <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"><path d="M12 5v14M5 12h14"/></svg>
+              添加
+            </button>
+          </div>
+        </div>
+
+        <div class="card">
+          <h3>
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 3v18h18"/><path d="M7 14l4-4 3 3 5-6"/></svg>
+            今日完成情况
+          </h3>
+          <div class="stat" id="todoStat"></div>
+          <div id="weekBars" style="margin-top:10px"></div>
+        </div>
+
+        <div class="card">
+          <h3>
+            任务列表
+            <div class="filters" id="todoPagingToggle" style="margin-left:auto;font-size:13px;gap:4px">
+              <span class="f" data-m="scroll">滚动加载</span>
+              <span class="f" data-m="pager">分页</span>
+            </div>
+          </h3>
+          <div class="filters" id="todoFilters">
+            <span class="f on" data-f="all">全部</span>
+            <span class="f" data-f="today">今日</span>
+            <span class="f" data-f="undone">未完成</span>
+          </div>
+          <div id="todoList"></div>
+        </div>
+      </section>
+
+      <!-- 复盘 -->
+      <section class="panel" id="panel-review">
+        <div class="card">
+          <h3>
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M4 4h16v16H4zM8 9h8M8 13h8M8 17h5"/></svg>
+            当日复盘
+          </h3>
+          <label>日期</label>
+          <input type="date" id="reviewDate">
+          <label>今天复盘（自由记录）</label>
+          <textarea id="reviewText" placeholder="今天做了什么、有什么卡点、明天注意什么……"></textarea>
+          <div class="row-actions">
+            <button class="btn" id="saveReview">
+              <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M20 6L9 17l-5-5"/></svg>
+              保存复盘
+            </button>
+          </div>
+        </div>
+        <div class="card">
+          <h3>
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 12a9 9 0 1015-6.7L21 8M21 3v5h-5"/></svg>
+            历史复盘
+          </h3>
+          <div id="reviewList"></div>
+        </div>
+      </section>
+
+      <!-- 总结 -->
+      <section class="panel" id="panel-weekly">
+        <div class="card">
+          <h3>
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="4" width="18" height="18" rx="2"/><path d="M16 2v4M8 2v4M3 10h18M8 14h2M8 18h2M14 14h2M14 18h2"/></svg>
+            总结
+          </h3>
+          <div class="note" id="weekNote"></div>
+          <div id="weekEditHint" style="display:none;color:var(--red);font-size:13px;margin:2px 0 10px">正在编辑一条总结，保存后更新该条；点「新建」可放弃编辑。</div>
+          <div class="grid2">
+            <div><label>开始日期</label><input type="date" id="weekStart"></div>
+            <div><label>结束日期</label><input type="date" id="weekEnd"></div>
+          </div>
+          <label>本期工作总结 <button class="linkbtn" type="button" onclick="autoFillWeek()">↻ 按区间自动汇总</button></label>
+          <textarea id="weekLast" placeholder="汇总本区间工作进展，可点击右侧自动汇总待办完成情况……"></textarea>
+          <label>下期重点工作</label>
+          <textarea id="weekPlan" placeholder="下一区间要推进的关键事项……"></textarea>
+          <div class="row-actions">
+            <button class="btn" id="saveWeek">
+              <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M20 6L9 17l-5-5"/></svg>
+              保存总结
+            </button>
+            <button class="btn ghost" id="newWeek">新建</button>
+          </div>
+        </div>
+        <div class="card">
+          <h3>
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">            <path d="M3 3v18h18"/><path d="M7 14l4-4 3 3 5-6"/></svg>
+            历史总结
+          </h3>
+          <div id="weekList"></div>
+        </div>
+      </section>
+
+      <!-- 提醒 -->
+      <section class="panel" id="panel-reminder">
+        <div class="card">
+          <h3>
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M18 8a6 6 0 00-12 0c0 7-3 9-3 9h18s-3-2-3-9M13.73 21a2 2 0 01-3.46 0"/></svg>
+            添加提醒
+          </h3>
+          <label>标题</label>
+          <input type="text" id="remTitle" placeholder="如：提交周报给领导" maxlength="60">
+          <label>提醒时间</label>
+          <input type="datetime-local" id="remTime">
+          <label>内容（可选）</label>
+          <textarea id="remContent" placeholder="补充说明（可选）" style="min-height:60px"></textarea>
+          <div class="note" style="margin-top:8px">开启浏览器通知权限后，到时间会弹出系统提示（页面需保持打开）；未授权则仅在本页「今天要处理」横幅显示。</div>
+          <div class="row-actions">
+            <button class="btn" id="addReminder">
+              <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"><path d="M12 5v14M5 12h14"/></svg>
+              添加提醒
+            </button>
+          </div>
+        </div>
+        <div class="card">
+          <h3>
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 6h18M8 6V4a2 2 0 012-2h4a2 2 0 012 2v2m2 0v14a2 2 0 01-2 2H7a2 2 0 01-2-2V6"/></svg>
+            提醒列表
+          </h3>
+          <div id="reminderList"></div>
+        </div>
+      </section>
+
+      <!-- 随笔 -->
+      <section class="panel" id="panel-note">
+        <div class="card">
+          <h3>
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 20h9M16.5 3.5a2.12 2.12 0 013 3L7 19l-4 1 1-4 12.5-12.5z"/></svg>
+            记一笔灵感
+          </h3>
+          <label>标题（可选）</label>
+          <input type="text" id="noteTitle" placeholder="一句话概括，可留空" maxlength="60">
+          <label>内容</label>
+          <textarea id="noteContent" placeholder="此刻的灵感、想法、待查证的点…" style="min-height:72px"></textarea>
+          <div class="row-actions">
+            <button class="btn" id="addNote">
+              <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"><path d="M12 5v14M5 12h14"/></svg>
+              记一笔
+            </button>
+          </div>
+          <div class="note" style="margin-top:8px">提示：编辑框内按 Ctrl/⌘ + Enter 可快速记录。</div>
+        </div>
+        <div class="card">
+          <h3>
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M4 4h16v16H4zM8 8h8M8 12h8M8 16h5"/></svg>
+            灵感列表
+          </h3>
+          <div id="noteList"></div>
+        </div>
+      </section>
+    </main>
+  </div>
+</div>
+
+<!-- 备份弹窗 -->
+<div class="mask" id="toolsMask">
+  <div class="modal">
+    <h3>个性化设置</h3>
+    <div class="note" style="background:#f0f9ff;border:1px solid #cfe0ff;border-radius:8px;padding:10px 12px">
+      <div style="display:flex;align-items:flex-start;gap:8px;margin-bottom:12px">
+        <label style="font-size:13px;color:var(--muted);min-width:70px;padding-top:6px">外观方案</label>
+        <div id="themeBtns" style="flex:1;display:flex;flex-wrap:wrap;gap:6px"></div>
+      </div>
+      <div style="display:flex;align-items:center;gap:8px;margin-bottom:8px">
+        <label style="font-size:13px;color:var(--muted);min-width:70px">使用人</label>
+        <input type="text" id="userNameInput" placeholder="输入你的名字" style="flex:1;padding:6px 10px;font-size:13px;border:1px solid var(--border);border-radius:8px">
+      </div>
+      <div style="display:flex;align-items:center;gap:8px">
+        <label style="font-size:13px;color:var(--muted);min-width:70px">每页条数</label>
+        <input type="number" id="pageSizeInput" min="3" max="50" value="8" style="flex:1;padding:6px 10px;font-size:13px;border:1px solid var(--border);border-radius:8px"></div>
+      <div style="display:flex;align-items:flex-start;gap:8px;margin-top:8px">
+        <label style="font-size:13px;color:var(--muted);min-width:70px;padding-top:6px">分类列表</label>
+        <div id="categoryList" style="flex:1"></div>
+      </div>
+      <button class="btn sm" id="saveSettingsBtn" style="margin-top:10px;width:100%">保存设置</button>
+    </div>
+    <h3 style="margin-top:18px">数据备份与恢复</h3>
+    <div class="note">数据优先保存在本机浏览器（localStorage），并自动同步到云端（登录后）。清缓存/重装浏览器会丢，建议绑定本地文件自动备份，或定期导出 JSON 备份。</div>
+    <div id="fsStatus" class="note" style="margin-top:-4px;color:#0f62fe"></div>
+    <div class="row-actions" style="flex-direction:column">
+      <button class="btn" id="bindFileBtn" style="width:100%">
+        <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M10 13a5 5 0 007.07 0l3-3a5 5 0 00-7.07-7.07l-1.72 1.71"/><path d="M14 11a5 5 0 00-7.07 0l-3 3a5 5 0 007.07 7.07l1.71-1.71"/></svg>
+        绑定本地文件（自动备份）
+      </button>
+      <button class="btn danger" id="unbindFileBtn" style="width:100%;display:none">
+        <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M18 6L6 18M6 6l12 12"/></svg>
+        解除绑定
+      </button>
+      <button class="btn ghost" id="exportBtn" style="width:100%">
+        <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 15v4a2 2 0 01-2 2H5a2 2 0 01-2-2v-4M7 10l5 5 5-5M12 15V3"/></svg>
+        导出 JSON 备份
+      </button>
+      <button class="btn ghost" id="importBtn" style="width:100%">
+        <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 15v4a2 2 0 01-2 2H5a2 2 0 01-2-2v-4M17 8l-5-5-5 5M12 3v12"/></svg>
+        导入恢复（JSON）
+      </button>
+      <button class="btn danger" id="clearSampleBtn" style="width:100%">
+        <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 6h18M8 6V4a2 2 0 012-2h4a2 2 0 012 2v2m2 0v14a2 2 0 01-2 2H7a2 2 0 01-2-2V6"/></svg>
+        清空示例数据
+      </button>
+      <button class="btn danger" id="clearAllBtn" style="width:100%">
+        <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 6h18M19 6l-1 14a2 2 0 01-2 2H8a2 2 0 01-2-2L5 6M10 11v6M14 11v6M9 6V4h6v2"/></svg>
+        清空全部数据
+      </button>
+      <button class="btn" id="closeTools" style="width:100%;background:#e5e7eb;color:#374151">关闭</button>
+    </div>
+    <input type="file" id="importFile" accept="application/json,.json" style="display:none">
+  </div>
+</div>
+
+<!-- 登录 / 注册弹窗 -->
+<div class="mask" id="loginMask">
+  <div class="modal" style="max-width:340px">
+    <h3>登录账号（多设备同步）</h3>
+    <p style="font-size:13px;color:var(--muted);margin:0 0 12px">首次使用该用户名 + 密码将自动注册。登录后数据在设备间自动同步。</p>
+    <label>用户名</label>
+    <input type="text" id="loginUser" maxlength="30" placeholder="自定用户名" autocomplete="username">
+    <label>密码</label>
+    <input type="password" id="loginPass" placeholder="自定密码（≥6 位）" autocomplete="current-password">
+    <div class="row-actions" style="margin-top:10px">
+      <button class="btn" id="loginSubmit" style="flex:1;background:#2563eb;color:#fff">登录 / 注册</button>
+      <button class="btn" id="loginCancel" style="flex:1;background:#e5e7eb;color:#374151">取消</button>
+    </div>
+    <p id="loginErr" style="color:#c0392b;font-size:13px;min-height:16px;margin:8px 0 0"></p>
+    <button class="btn ghost sm" id="logoutBtn" style="margin-top:6px;display:none;width:100%">退出当前账号</button>
+  </div>
+</div>
+
+<!-- 确认弹窗 -->
+<div class="mask" id="confirmMask">
+  <div class="modal">
+    <h3 id="confirmTitle">确认</h3>
+    <p id="confirmText" style="font-size:14px;color:var(--muted);margin:0 0 16px"></p>
+    <div class="row-actions">
+      <button class="btn danger" id="confirmYes" style="flex:1">确认</button>
+      <button class="btn" id="confirmNo" style="flex:1;background:#e5e7eb;color:#374151">取消</button>
+    </div>
+  </div>
+</div>
+
+<!-- 多选项弹窗 -->
+<div class="mask" id="choiceMask">
+  <div class="modal">
+    <h3 id="choiceTitle">选择</h3>
+    <p id="choiceText" style="font-size:14px;color:var(--muted);margin:0 0 16px;white-space:pre-wrap"></p>
+    <div class="row-actions" id="choiceBtns"></div>
+  </div>
+</div>
+
+<!-- CloudBase Web SDK 2.x（官方 CDN static.cloudbase.net，国内直连）
+     全局变量：window.cloudbase（auth.js 已兼容 window.tcb 旧名）
+     注意：CloudBase 已停用 1.x 匿名票据（ACCESS_TOKEN_DISABLED），必须 2.0+ 才能调云函数
+     离线/未联网时加载失败，app.js 会退化为纯本地模式（仅 localStorage） -->
+<script src="https://static.cloudbase.net/cloudbase-js-sdk/2.32.0/cloudbase.full.js"></script>
+<script>
+window.addEventListener("error", function (e) {
+  // CDN 加载失败时给出友好提示，方便排查
+  if (e && e.target && /cloudbase\.full\.js/.test(String(e.target.src || ""))) {
+    console.warn("[boot] cloudbase.full.js 加载失败，云同步功能不可用，仅本地模式", e);
+  }
+}, true);
+</script>
+<script src="core.js"></script>
+<script src="modules/todos.js"></script>
+<script src="modules/reviews.js"></script>
+<script src="modules/weeklies.js"></script>
+<script src="modules/reminders.js"></script>
+<script src="modules/notes.js"></script>
+<script src="storage.js"></script>
+<script src="cloud.config.js"></script>
+<script src="sync.js"></script>
+<script src="auth.js"></script>
+<script src="app.js"></script>
+</body>
+</html>
